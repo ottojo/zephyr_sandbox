@@ -33,15 +33,8 @@
 };
 
 zephyr_udc0: &usb {
-	status = "okay";
 	pinctrl-0 = <&usb_dm_pa11 &usb_dp_pa12>;
 	pinctrl-names = "default";
-
-	cdc_acm_uart0: cdc_acm_uart0 {
-		compatible = "zephyr,cdc-acm-uart";
-		label = "CDC_ACM_0";
-	};
-
 };
 
 i2c_internal: &i2c2 {
@@ -51,7 +44,6 @@ i2c_internal: &i2c2 {
 
     // TODO: FUSB302
 };
-
 
 &clk_hsi {
 	status = "okay";
