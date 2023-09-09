@@ -2,11 +2,13 @@ manifest:
   remotes:
     - name: zephyrproject-rtos
       url-base: https://github.com/zephyrproject-rtos
+    - name: ottojo
+      url-base: https://github.com/ottojo
 
   projects:
     - name: zephyr
-      remote: zephyrproject-rtos
-      revision: main
+      remote: ottojo
+      revision: f027x8
       import:
         name-allowlist:
           - cmsis      # required by the ARM port

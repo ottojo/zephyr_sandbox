@@ -1,0 +1,6 @@
+if BOARD_OTTERPILL
+
+config BOARD
+	default "otterpill"
+
+endif # BOARD_OTTERPILL

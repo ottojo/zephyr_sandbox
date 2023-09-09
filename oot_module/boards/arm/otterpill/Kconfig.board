@@ -1,0 +1,3 @@
+config BOARD_OTTERPILL
+    bool "Otterpill Board"
+    depends on SOC_STM32F072X8
