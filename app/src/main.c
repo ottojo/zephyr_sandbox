@@ -3,7 +3,8 @@
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/usb/usb_device.h>
-#include <zephyr/drivers/uart.h>
+#include <zephyr/drivers/usb_c/fusb302b.h>
+
 
 /* The devicetree node identifier for the "led0" alias. */
 #define LED0_NODE DT_ALIAS(led0)
@@ -14,7 +15,8 @@
  */
 static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
 
-const struct device *const console_dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
+
+const struct device *const fusb_dev = DEVICE_DT_GET(DT_NODELABEL(fusb));
 
 
 int main() {
@@ -29,25 +31,40 @@ int main() {
         return 1;
     }
 
-
-    uint32_t dtr = 0;
-
     if (usb_enable(NULL)) {
         return 1;
     }
 
-    //while (!dtr) {
-    //    uart_line_ctrl_get(console_dev, UART_LINE_CTRL_DTR, &dtr);
-    //    k_sleep(K_MSEC(100));
-    //}
+
+    k_sleep(K_SECONDS(5));
+
+    int res = fusb302_setup(fusb_dev);
+    if (res == 0) {
+        printk("USB setup successful!\n");
+    } else {
+        printk("USB setup not successful!\n");
+    }
+
+
 
     int i = 0;
     while (true) {
-        printk("Hello World %d\n", i);
         ret = gpio_pin_toggle_dt(&led);
         if (ret < 0) {
             return 0;
         }
+
+        if (device_is_ready(fusb_dev)) {
+            printk("FUSB device ready\n");
+            if (fusb302b_verify(fusb_dev)) {
+                printk("FUSB device verified\n");
+            } else {
+                printk("FUSB device not verified\n");
+            }
+        } else {
+            printk("FUSB device not ready\n");
+        }
+
         k_sleep(K_MSEC(1000));
         i++;
     }

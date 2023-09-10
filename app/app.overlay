@@ -6,3 +6,28 @@
 		label = "CDC_ACM_0";
 	};
 };
+
+&i2c_internal {
+    status = "okay";
+
+    fusb: fusb302b@22 {
+        compatible = "fcs,fusb302b";
+        status = "okay";
+        reg = <0x22>;
+    };
+};
+
+/*
+&ports {
+    typec: fusb302b {
+        connector {
+            compatible = "usb-c-connector";
+            tcpc = <&fusb>; // Type C Port Controller
+            power-role = "sink";
+            sink-pdos = <PDO_FIXED(5000, 2000, PDO_FIXED_USB_COMM)
+                         PDO_VAR(5000, 12000, 2000)>;
+            op-sink-microwatt = <10000000>; // 10W
+        };
+    };
+}
+*/
