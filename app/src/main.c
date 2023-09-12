@@ -2,6 +2,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/usb_c/fusb302b.h>
+#include <zephyr/drivers/usb_c/usbc_vbus.h>
 #include <zephyr/logging/log.h>
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
@@ -16,8 +17,8 @@ LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
  */
 static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
 
-
 const struct device *const fusb_dev = DEVICE_DT_GET(DT_NODELABEL(fusb));
+const struct device *const vbus_dev = DEVICE_DT_GET(DT_NODELABEL(fvbus));
 
 
 int main() {
@@ -42,7 +43,6 @@ int main() {
         }
 
         if (device_is_ready(fusb_dev)) {
-
             LOG_INF("FUSB device ready\n");
             if (fusb302b_verify(fusb_dev)) {
                 LOG_INF("FUSB device verified\n");
@@ -50,6 +50,13 @@ int main() {
                     LOG_INF("FUSB setup successful\n");
                 } else {
                     LOG_ERR("FUSB setup unsuccessful\n");
+                }
+
+                int meas = 0;
+                if (usbc_vbus_measure(vbus_dev, &meas) == 0) {
+                    LOG_INF("VBUS Measurement successful: %d mV", meas);
+                } else {
+                    LOG_ERR("VBUS Measurement unsuccessful");
                 }
             } else {
                 LOG_ERR("FUSB device not verified\n");

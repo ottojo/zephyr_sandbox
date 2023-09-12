@@ -9,14 +9,15 @@
 
 #include "fusb302b_private.h"
 #include <zephyr/drivers/usb_c/fusb302b.h>
-#include <zephyr/usb_c/usbc.h>
+#include <zephyr/drivers/usb_c/usbc_tcpc.h>
 #include <zephyr/logging/log.h>
 
-LOG_MODULE_REGISTER(fusb302b, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(fusb302b, LOG_LEVEL_DBG);
 
 static const uint8_t REG_DEVICE_ID = 0x01;
 static const uint8_t REG_SWITCHES0 = 0x02;
 static const uint8_t REG_SWITCHES1 = 0x03;
+static const uint8_t REG_MEASURE = 0x04;
 static const uint8_t REG_CONTROL0 = 0x06;
 static const uint8_t REG_CONTROL1 = 0x07;
 static const uint8_t REG_CONTROL3 = 0x09;
@@ -91,6 +92,54 @@ bool fusb302b_verify(const struct device *dev) {
     LOG_INF("%s %s_%s detected\n", product_str, version_str, revision_str);
 
     return true;
+}
+
+static int vbus_level_to_mv(uint8_t level) {
+    return (level + 1) * 420;
+}
+
+static bool vbus_above(const struct fusb302b_cfg *cfg, uint8_t level) {
+    // Set MEAS_VBUS to 1, to measure VBUS with the MDAC/comparator
+    int res = i2c_reg_write_byte_dt(&cfg->i2c, REG_MEASURE, 0b01000000 | (level & 0b111111));
+    if (res != 0) { LOG_ERR("Error setting DAC to measure VBUS: %d", res); }
+    uint8_t status0 = 0;
+    res = i2c_reg_read_byte_dt(&cfg->i2c, REG_STATUS0, &status0);
+    if (res != 0) { LOG_ERR("Error getting comparison to measure VBUS: %d", res); }
+    bool above = (status0 & 0b00100000) != 0;
+    LOG_DBG("VBUS %c%d mV", above ? '>' : '<', vbus_level_to_mv(level));
+    return above;
+}
+
+
+int fusb302_measure_vbus(const struct device *dev, int *meas) {
+    const struct fusb302b_cfg *cfg = dev->config;
+
+    // Set MEAS_CC bits to 0
+    int res = i2c_reg_write_byte_dt(&cfg->i2c, REG_SWITCHES0, 0x00000011);
+    if (res != 0) { return -EIO; }
+
+
+    uint8_t lower_bound = 0;
+    uint8_t upper_bound = 0b111111;
+    if (!vbus_above(cfg, lower_bound)) {
+        return vbus_level_to_mv(lower_bound);
+    }
+    if (vbus_above(cfg, upper_bound)) {
+        return vbus_level_to_mv(upper_bound);
+    }
+
+    // Binary search VBUS voltage
+    while ((upper_bound - lower_bound) > 1) {
+        uint8_t middle = (lower_bound + upper_bound) / 2;
+        if (vbus_above(cfg, middle)) {
+            lower_bound = middle;
+        } else {
+            upper_bound = middle;
+        }
+    }
+
+    *meas = vbus_level_to_mv(upper_bound);
+    return 0;
 }
 
 int fusb302_reset(const struct device *dev) {

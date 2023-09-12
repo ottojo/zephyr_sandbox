@@ -18,5 +18,6 @@ bool fusb302b_verify(const struct device *device);
 
 int fusb302_setup(const struct device *dev);
 
+int fusb302_measure_vbus(const struct device *dev, int *meas);
 
 #endif //ZEPHYR_SANDBOX_2_FUSB302B_H

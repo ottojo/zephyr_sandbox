@@ -16,6 +16,7 @@ struct fusb302b_data {
 struct fusb302b_cfg {
     struct i2c_dt_spec i2c;
 };
+
 int fusb302b_init(const struct device *dev);
 
 
