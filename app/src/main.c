@@ -1,9 +1,10 @@
 #include <stdbool.h>
-#include <zephyr/sys/printk.h>
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/gpio.h>
-#include <zephyr/usb/usb_device.h>
 #include <zephyr/drivers/usb_c/fusb302b.h>
+#include <zephyr/logging/log.h>
+
+LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
 
 /* The devicetree node identifier for the "led0" alias. */
@@ -31,41 +32,31 @@ int main() {
         return 1;
     }
 
-    if (usb_enable(NULL)) {
-        return 1;
-    }
-
-
-    k_sleep(K_SECONDS(5));
-
-    int res = fusb302_setup(fusb_dev);
-    if (res == 0) {
-        printk("USB setup successful!\n");
-    } else {
-        printk("USB setup not successful!\n");
-    }
-
-
-
     int i = 0;
     while (true) {
+        k_sleep(K_MSEC(5000));
+
         ret = gpio_pin_toggle_dt(&led);
         if (ret < 0) {
             return 0;
         }
 
         if (device_is_ready(fusb_dev)) {
-            printk("FUSB device ready\n");
+
+            LOG_INF("FUSB device ready\n");
             if (fusb302b_verify(fusb_dev)) {
-                printk("FUSB device verified\n");
+                LOG_INF("FUSB device verified\n");
+                if (fusb302_setup(fusb_dev) == 0) {
+                    LOG_INF("FUSB setup successful\n");
+                } else {
+                    LOG_ERR("FUSB setup unsuccessful\n");
+                }
             } else {
-                printk("FUSB device not verified\n");
+                LOG_ERR("FUSB device not verified\n");
             }
         } else {
-            printk("FUSB device not ready\n");
+            LOG_ERR("FUSB device not ready\n");
         }
-
-        k_sleep(K_MSEC(1000));
         i++;
     }
 }

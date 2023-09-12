@@ -1,4 +1,4 @@
-
+/*
 &zephyr_udc0 {
 	status = "okay";
 	cdc_acm_uart0: cdc_acm_uart0 {
@@ -6,6 +6,7 @@
 		label = "CDC_ACM_0";
 	};
 };
+ */
 
 &i2c_internal {
     status = "okay";
@@ -16,6 +17,13 @@
         reg = <0x22>;
     };
 };
+
+/ {
+    chosen {
+        zephyr,shell-uart = &usart1;
+    };
+};
+
 
 /*
 &ports {

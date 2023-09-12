@@ -9,6 +9,10 @@
 
 #include "fusb302b_private.h"
 #include <zephyr/drivers/usb_c/fusb302b.h>
+#include <zephyr/usb_c/usbc.h>
+#include <zephyr/logging/log.h>
+
+LOG_MODULE_REGISTER(fusb302b, LOG_LEVEL_INF);
 
 static const uint8_t REG_DEVICE_ID = 0x01;
 static const uint8_t REG_SWITCHES0 = 0x02;
@@ -34,54 +38,57 @@ bool fusb302b_verify(const struct device *dev) {
     const uint8_t product_id = (device_id >> 2) & 0b11;
     const uint8_t revision_id = device_id & 0b11;
 
+    const char *product_str = 0;
     switch (product_id) {
         case 0b00:
-            printk("FUSB302B(MP|VMP|UC)X ");
+            product_str = "FUSB302B(MP|VMP|UC)X";
             break;
         case 0b01:
-            printk("FUSB302B01MPX ");
+            product_str = "FUSB302B01MPX";
             break;
         case 0b10:
-            printk("FUSB302B10MPX ");
+            product_str = "FUSB302B10MPX";
             break;
         case 0b11:
-            printk("FUSB302B11MPX ");
+            product_str = "FUSB302B11MPX";
             break;
-        default:
-            __builtin_unreachable();
+        default: __ASSERT_NO_MSG(false);
+            return -EIO;
     }
 
+    const char *version_str = 0;
     switch (version_id) {
         case 0b1000:
-            printk("A_");
+            version_str = "A";
             break;
         case 0b1001:
-            printk("B_");
+            version_str = "B";
             break;
         case 0b1010:
-            printk("C_");
+            version_str = "C";
             break;
         default:
             return -ENODEV;
     }
 
+    const char *revision_str = 0;
     switch (revision_id) {
         case 0b00:
-            printk("revA");
+            revision_str = "revA";
             break;
         case 0b01:
-            printk("revB");
+            revision_str = "revB";
             break;
         case 0b10:
-            printk("revC");
+            revision_str = "revC";
             break;
         case 0b11:
-            printk("revD");
+            revision_str = "revD";
             break;
-        default:
-            __builtin_unreachable();
+        default: __ASSERT_NO_MSG(false);
+            return -EIO;
     }
-    printk(" detected\n");
+    LOG_INF("%s %s_%s detected\n", product_str, version_str, revision_str);
 
     return true;
 }
@@ -119,13 +126,13 @@ int fusb302_setup(const struct device *dev) {
         used_cc_line = 2;
     } else if (voltage_level_1 == 0 && voltage_level_2 == 0) {
         // No CC connected?
-        printk("No CC pins connected!\n");
+        LOG_WRN("No CC pins connected!\n");
         return -ENODEV;
     } else {
-        printk("Invalid CC voltage levels: BC_LVL 1: %d, BC_LVL 2: %d\n", voltage_level_1, voltage_level_2);
+        LOG_WRN("Invalid CC voltage levels: BC_LVL 1: %d, BC_LVL 2: %d\n", voltage_level_1, voltage_level_2);
         return -ENODEV;
     }
-    printk("CC pin in use: %d\n", used_cc_line);
+    LOG_INF("CC pin in use: %d\n", used_cc_line);
 
     // Enable transmit driver for proper CC line, enable AUTO_CRC
     uint8_t cc_select = (used_cc_line == 1) ? 0b01 : 0b10;
@@ -157,11 +164,11 @@ int fusb302b_read_messages(const struct device *dev) {
     uint8_t rx_empty = (status1 >> 5) & 0b1;
 
     if (rx_empty) {
-        printk("RX buffer empty\n");
+        LOG_INF("RX buffer empty\n");
         return 0;
     }
 
-    printk("RX buffer contains something, reading...\n");
+    LOG_INF("RX buffer contains something, reading...\n");
     uint8_t rx_buffer[80];
     res = i2c_burst_read_dt(&cfg->i2c, REG_FIFO, rx_buffer, sizeof(rx_buffer));
     if (res != 0) { return -EIO; }
@@ -205,6 +212,40 @@ int fusb302b_init(const struct device *dev) {
     return 0;
 }
 
+// required == assumed by assertion, optional == results in ENOSYS
+static const struct tcpc_driver_api fusb302b_tcpc_driver_api = {
+        .init = NULL, // TODO Required
+        .get_cc = NULL, // Optional
+        .select_rp_value=NULL, // Optional
+        .get_rp_value = NULL,// Optional
+        .set_cc = NULL, // TODO Required
+        .set_vconn_discharge_cb = NULL, // TODO Required
+        .set_vconn_cb = NULL,// TODO Required
+        .vconn_discharge = NULL,// Optional
+        .set_vconn = NULL, // Optional
+        .set_roles = NULL, // Optional
+        .receive_data = NULL, // Optional
+        .is_rx_pending_msg = NULL, // Optional
+        .set_rx_enable = NULL, // Optional
+        .set_cc_polarity = NULL, // TODO Required
+        .transmit_data = NULL, // Optional
+        .dump_std_reg = NULL, // Optional
+        .alert_handler_cb=NULL, // Unused?
+        .get_status_register=NULL, // Optional
+        .clear_status_register=NULL, // Optional
+        .mask_status_register=NULL, // Optional
+        .set_debug_accessory=NULL, // Optional
+        .set_debug_detach=NULL, // Optional
+        .set_drp_toggle=NULL, // Optional
+        .get_snk_ctrl=NULL, // Optional
+        .get_src_ctrl=NULL, // Optional
+        .get_chip_info=NULL, // Optional
+        .set_low_power_mode=NULL, // Optional
+        .sop_prime_enable=NULL, // Optional
+        .set_bist_test_mode=NULL, // Optional
+        .set_alert_handler_cb=NULL, // Required
+};
+
 #define FUSB302B_DEFINE(inst) \
     static struct fusb302b_data fusb302b_data_##inst; \
      \
@@ -218,7 +259,9 @@ int fusb302b_init(const struct device *dev) {
         &fusb302b_config_##inst, \
         /* level = */ APPLICATION, \
         CONFIG_KERNEL_INIT_PRIORITY_DEVICE, \
-        /* api = */ NULL \
+        NULL /*&fusb302b_tcpc_driver_api*/  \
     );
+
+BUILD_ASSERT(DT_NUM_INST_STATUS_OKAY(DT_DRV_COMPAT) > 0, "No compatible FUSB302B instance found");
 
 DT_INST_FOREACH_STATUS_OKAY(FUSB302B_DEFINE)

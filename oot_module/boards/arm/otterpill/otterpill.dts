@@ -8,8 +8,7 @@
 	compatible = "otterpill";
 
 	chosen {
-		zephyr,console = &cdc_acm_uart0;
-		zephyr,shell-uart = &cdc_acm_uart0;
+		zephyr,console = &usart1;
 		zephyr,sram = &sram0;
 		zephyr,flash = &flash0;
 	};
@@ -26,10 +25,6 @@
 		led0 = &led_status;
 		watchdog0 = &iwdg;
 	};
-};
-
-&usb {
-    status = "okay";
 };
 
 zephyr_udc0: &usb {
