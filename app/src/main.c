@@ -3,6 +3,7 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/usb_c/fusb302b.h>
 #include <zephyr/drivers/usb_c/usbc_vbus.h>
+#include <zephyr/usb_c/usbc.h>
 #include <zephyr/logging/log.h>
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
@@ -20,6 +21,7 @@ static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
 const struct device *const fusb_dev = DEVICE_DT_GET(DT_NODELABEL(fusb));
 const struct device *const vbus_dev = DEVICE_DT_GET(DT_NODELABEL(fvbus));
 
+const struct device *const port1 = DEVICE_DT_GET(DT_NODELABEL(port1));
 
 int main() {
     int ret;
@@ -31,6 +33,14 @@ int main() {
     ret = gpio_pin_configure_dt(&led, GPIO_OUTPUT_ACTIVE);
     if (ret < 0) {
         return 1;
+    }
+
+    LOG_INF("Starting USB-C");
+    usbc_start(port1);
+
+    while (true) {
+        gpio_pin_toggle_dt(&led);
+        k_sleep(K_MSEC(1000));
     }
 
     int i = 0;

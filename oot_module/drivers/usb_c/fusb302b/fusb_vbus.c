@@ -28,6 +28,7 @@ static int fusb_measure(const struct device *dev, int *vbus_meas) {
 
 static bool fusb_check_level(const struct device *dev, enum tc_vbus_level level) {
     int meas = 0;
+    // TODO: Set comparator directly at the 3 levels
     int ret = fusb_measure(dev, &meas);
     if (ret != 0) {
         return false;
@@ -72,7 +73,7 @@ static struct usbc_vbus_driver_api fusb302b_vbus_api = {
         &fusb302b_vbus_data_##inst, \
         &fusb302b_vbus_config_##inst, \
         /* level = */ APPLICATION, \
-        CONFIG_KERNEL_INIT_PRIORITY_DEVICE, \
+        CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, \
         &fusb302b_vbus_api \
     );
 

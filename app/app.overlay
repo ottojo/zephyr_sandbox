@@ -40,8 +40,7 @@
             tcpc = <&fusb>; // Type C Port Controller
             vbus = <&fvbus>;
             power-role = "sink";
-            sink-pdos = <PDO_FIXED(5000, 100, 0)>;
+            sink-pdos = <PDO_FIXED(9000, 100, 0)>;
         };
     };
 };
-
