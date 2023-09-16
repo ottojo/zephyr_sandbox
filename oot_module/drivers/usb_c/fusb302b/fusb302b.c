@@ -140,7 +140,7 @@ int fusb302_measure_vbus(const struct device *dev, int *meas) {
     }
 
     *meas = vbus_level_to_mv(upper_bound);
-    LOG_INF("Measured VBUS at %dmV", *meas);
+    LOG_DBG("Measured VBUS at %dmV", *meas);
     return 0;
 }
 
@@ -233,26 +233,6 @@ int fusb302_setup(const struct device *dev) {
     return 0;
 }
 
-int fusb302b_read_messages(const struct device *dev) {
-    const struct fusb302b_cfg *cfg = dev->config;
-
-    uint8_t status1;
-    int res = i2c_reg_read_byte_dt(&cfg->i2c, REG_STATUS1, &status1);
-    if (res != 0) { return -EIO; }
-    uint8_t rx_empty = (status1 >> 5) & 0b1;
-
-    if (rx_empty) {
-        LOG_INF("RX buffer empty\n");
-        return 0;
-    }
-
-    LOG_INF("RX buffer contains something, reading...\n");
-    uint8_t rx_buffer[80];
-    res = i2c_burst_read_dt(&cfg->i2c, REG_FIFO, rx_buffer, sizeof(rx_buffer));
-    if (res != 0) { return -EIO; }
-
-    return -ENODEV;
-}
 
 int fusb302b_init(const struct device *dev) {
     const struct fusb302b_cfg *cfg = dev->config;
@@ -307,7 +287,7 @@ static const char *cc_pull_to_str(enum tc_cc_pull cc_pull) {
 static int fusb302b_set_cc(const struct device *dev, enum tc_cc_pull cc_pull) {
     const struct fusb302b_cfg *cfg = dev->config;
 
-    LOG_DBG("Setting CC to %s", cc_pull_to_str(cc_pull));
+    LOG_INF("Setting CC to %s", cc_pull_to_str(cc_pull));
 
     switch (cc_pull) {
         case TC_CC_RA:
@@ -393,7 +373,7 @@ static const char *cc_state_to_str(enum tc_cc_voltage_state cc_state) {
 static int fusb302b_get_cc(const struct device *dev, enum tc_cc_voltage_state *cc1, enum tc_cc_voltage_state *cc2) {
     const struct fusb302b_cfg *cfg = dev->config;
     //LOG_INF("Determining CC state");
-
+    // TODO: Determine voltage (and therefore RP type), see https://hackaday.com/2023/01/04/all-about-usb-c-resistors-and-emarkers/
     enum cc_res cc = get_cc_line(cfg);
     switch (cc) {
         case CC_RES_1:
@@ -428,9 +408,73 @@ summarized in Table 5
     return 0;
 }
 
-static int fusb302b_receive_data(const struct device *dev, struct pd_msg *msg) {
+/**
+ * @brief Retrieves the Power Delivery message from the TCPC
+ *
+ * @param dev  Runtime device structure
+ * @param buf  pointer where the pd_buf pointer is written
+ *
+ * @retval Greater or equal to 0 is the number of bytes received
+ * @retval -EIO on failure
+ * @retval -EFAULT on buf being NULL
+ * @retval -ENOSYS if not implemented
+ */
+static int fusb302b_receive_data(const struct device *dev, struct pd_msg *buf) {
     LOG_INF("Receiving data");
-    return -ENOSYS;
+
+    if (buf == NULL) {
+        return -EFAULT;
+    }
+
+    const struct fusb302b_cfg *cfg = dev->config;
+
+    uint8_t status1;
+    int res = i2c_reg_read_byte_dt(&cfg->i2c, REG_STATUS1, &status1);
+    if (res != 0) { return -EIO; }
+    uint8_t rx_empty = (status1 >> 5) & 0b1;
+
+    if (rx_empty) {
+        LOG_INF("RX buffer empty\n");
+        return -EIO;
+    }
+
+    uint8_t rx_buffer[FUSB302_RX_BUFFER_SIZE];
+    BUILD_ASSERT(sizeof(rx_buffer) <= sizeof(buf->data), "");
+    res = i2c_burst_read_dt(&cfg->i2c, REG_FIFO, rx_buffer, sizeof(rx_buffer));
+    if (res != 0) { return -EIO; }
+
+    LOG_HEXDUMP_INF(rx_buffer, sizeof(rx_buffer), "Received data");
+
+    // First byte determines package type
+    uint8_t fusb_type = rx_buffer[0] >> 5;
+    switch (fusb_type) {
+        case 0b111:
+            buf->type = PD_PACKET_SOP;
+            break;
+        case 0b110:
+            buf->type = PD_PACKET_SOP_PRIME;
+            break;
+        case 0b101:
+            buf->type = PD_PACKET_PRIME_PRIME;
+            break;
+        case 0b100:
+            buf->type = PD_PACKET_DEBUG_PRIME;
+            break;
+        case 0b011:
+            buf->type = PD_PACKET_DEBUG_PRIME_PRIME;
+            break;
+        default:
+            return -EIO;
+    }
+
+    // Length
+    buf->header.raw_value = rx_buffer[1] | (rx_buffer[2] << 8);
+    buf->len = PD_CONVERT_PD_HEADER_COUNT_TO_BYTES(buf->header.number_of_data_objects);
+    LOG_INF("Received %d data objects", buf->header.number_of_data_objects);
+    __ASSERT(buf->len + 3 <= sizeof(rx_buffer), "PD message size greater than RX buffer");
+    memcpy(buf->data, rx_buffer + 1 /* package type */ + 2 /* header */, buf->len);
+
+    return buf->len + 2 /* header */;
 }
 
 static bool fusb302b_is_rx_pending_msg(const struct device *dev, enum pd_packet_type *type) {
@@ -446,11 +490,9 @@ static int fusb302b_set_rx_enable(const struct device *dev, bool enable) {
 int fusb302b_set_cc_polarity(const struct device *dev, enum tc_cc_polarity polarity) {
     const struct fusb302b_cfg *cfg = dev->config;
     // Enable transmit driver for proper CC line
-    // TODO: This disables auto crc, do we want that? STM32 seems to do that manually.
-    //  Maybe we can skip a bunch of that? It seems like a lot of work...
     uint8_t cc_select = (polarity == TC_POLARITY_CC1) ? 0b01 : 0b10;
     LOG_INF("Enabling TX driver for CC %d", cc_select);
-    int res = i2c_reg_write_byte_dt(&cfg->i2c, REG_SWITCHES1, 0b00100000 | cc_select);
+    int res = i2c_reg_write_byte_dt(&cfg->i2c, REG_SWITCHES1, 0b00100100 | cc_select);
     if (res != 0) { return -EIO; }
     return 0;
 }

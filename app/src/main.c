@@ -23,6 +23,117 @@ const struct device *const vbus_dev = DEVICE_DT_GET(DT_NODELABEL(fvbus));
 
 const struct device *const port1 = DEVICE_DT_GET(DT_NODELABEL(port1));
 
+
+static void display_pdo(const int idx,
+                        const uint32_t pdo_value) {
+    union pd_fixed_supply_pdo_source pdo;
+
+    /* Default to fixed supply pdo source until type is detected */
+    pdo.raw_value = pdo_value;
+
+    LOG_INF("PDO %d:", idx);
+    switch (pdo.type) {
+        case PDO_FIXED: {
+            LOG_INF("\tType:              FIXED");
+            LOG_INF("\tCurrent:           %d",
+                    PD_CONVERT_FIXED_PDO_CURRENT_TO_MA(pdo.max_current));
+            LOG_INF("\tVoltage:           %d",
+                    PD_CONVERT_FIXED_PDO_VOLTAGE_TO_MV(pdo.voltage));
+            LOG_INF("\tPeak Current:      %d", pdo.peak_current);
+            LOG_INF("\tUchunked Support:  %d",
+                    pdo.unchunked_ext_msg_supported);
+            LOG_INF("\tDual Role Data:    %d",
+                    pdo.dual_role_data);
+            LOG_INF("\tUSB Comms:         %d",
+                    pdo.usb_comms_capable);
+            LOG_INF("\tUnconstrained Pwr: %d",
+                    pdo.unconstrained_power);
+            LOG_INF("\tUSB Suspend:       %d",
+                    pdo.usb_suspend_supported);
+            LOG_INF("\tDual Role Power:   %d",
+                    pdo.dual_role_power);
+        }
+            break;
+        case PDO_BATTERY: {
+            union pd_battery_supply_pdo_source batt_pdo;
+
+            batt_pdo.raw_value = pdo_value;
+            LOG_INF("\tType:              BATTERY");
+            LOG_INF("\tMin Voltage: %d",
+                    PD_CONVERT_BATTERY_PDO_VOLTAGE_TO_MV(batt_pdo.min_voltage));
+            LOG_INF("\tMax Voltage: %d",
+                    PD_CONVERT_BATTERY_PDO_VOLTAGE_TO_MV(batt_pdo.max_voltage));
+            LOG_INF("\tMax Power:   %d",
+                    PD_CONVERT_BATTERY_PDO_POWER_TO_MW(batt_pdo.max_power));
+        }
+            break;
+        case PDO_VARIABLE: {
+            union pd_variable_supply_pdo_source var_pdo;
+
+            var_pdo.raw_value = pdo_value;
+            LOG_INF("\tType:        VARIABLE");
+            LOG_INF("\tMin Voltage: %d",
+                    PD_CONVERT_VARIABLE_PDO_VOLTAGE_TO_MV(var_pdo.min_voltage));
+            LOG_INF("\tMax Voltage: %d",
+                    PD_CONVERT_VARIABLE_PDO_VOLTAGE_TO_MV(var_pdo.max_voltage));
+            LOG_INF("\tMax Current: %d",
+                    PD_CONVERT_VARIABLE_PDO_CURRENT_TO_MA(var_pdo.max_current));
+        }
+            break;
+        case PDO_AUGMENTED: {
+            union pd_augmented_supply_pdo_source aug_pdo;
+
+            aug_pdo.raw_value = pdo_value;
+            LOG_INF("\tType:              AUGMENTED");
+            LOG_INF("\tMin Voltage:       %d",
+                    PD_CONVERT_AUGMENTED_PDO_VOLTAGE_TO_MV(aug_pdo.min_voltage));
+            LOG_INF("\tMax Voltage:       %d",
+                    PD_CONVERT_AUGMENTED_PDO_VOLTAGE_TO_MV(aug_pdo.max_voltage));
+            LOG_INF("\tMax Current:       %d",
+                    PD_CONVERT_AUGMENTED_PDO_CURRENT_TO_MA(aug_pdo.max_current));
+            LOG_INF("\tPPS Power Limited: %d", aug_pdo.pps_power_limited);
+        }
+            break;
+    }
+}
+
+uint32_t policy_cb_get_rdo(const struct device *dev) {
+// * @brief Get a Request Data Object from the DPM
+    // Get selected source cap from Device Policy Manager
+
+    // Build a Request Data Object
+
+    union pd_rdo rdo;
+    /* Maximum operating current 100mA (GIVEBACK = 0) */
+    rdo.fixed.min_or_max_operating_current = PD_CONVERT_MA_TO_FIXED_PDO_CURRENT(100);
+    /* Operating current 100mA */
+    rdo.fixed.operating_current = PD_CONVERT_MA_TO_FIXED_PDO_CURRENT(100);
+    /* Unchunked Extended Messages Not Supported */
+    rdo.fixed.unchunked_ext_msg_supported = 0;
+    /* No USB Suspend */
+    rdo.fixed.no_usb_suspend = 1;
+    /* Not USB Communications Capable */
+    rdo.fixed.usb_comm_capable = 0;
+    /* No capability mismatch */
+    rdo.fixed.cap_mismatch = 0;
+    /* Don't giveback */
+    rdo.fixed.giveback = 0;
+    /* Object position 1 (5V PDO) */
+    // TODO: Find out which source PDO lists the voltage we want. 1 is special for 5v or something
+    rdo.fixed.object_pos = 1;
+
+    return rdo.raw_value;
+
+}
+
+void handle_src_caps(const struct device *dev, const uint32_t *pdos,
+                     const int num_pdos) {
+    for (int i = 0; i < num_pdos; i++) {
+        display_pdo(i, pdos[i]);
+    }
+}
+
+
 int main() {
     int ret;
 
@@ -34,6 +145,10 @@ int main() {
     if (ret < 0) {
         return 1;
     }
+
+    usbc_set_policy_cb_set_src_cap(port1, handle_src_caps);
+
+    //usbc_set_policy_cb_get_rdo(port1, policy_cb_get_rdo);
 
     LOG_INF("Starting USB-C");
     usbc_start(port1);
