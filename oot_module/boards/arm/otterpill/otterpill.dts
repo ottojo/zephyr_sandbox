@@ -4,8 +4,7 @@
 #include <zephyr/dt-bindings/input/input-event-codes.h>
 
 / {
-	model = "OtterPill board";
-	compatible = "otterpill";
+	model = "OtterPill";
 
 	chosen {
 		zephyr,console = &usart1;
@@ -21,24 +20,50 @@
 		};
 	};
 
+    gpio_keys {
+        compatible = "gpio-keys";
+        dfu_button: button {
+            label = "DFU";
+            gpios = <&gpioc 13 GPIO_ACTIVE_HIGH>;
+            zephyr,code = <INPUT_KEY_0>;
+        };
+    };
+
 	aliases {
 		led0 = &led_status;
-		watchdog0 = &iwdg;
+        sw0 = &dfu_button;
+        watchdog0 = &iwdg;
 	};
-};
 
-zephyr_udc0: &usb {
-	pinctrl-0 = <&usb_dm_pa11 &usb_dp_pa12>;
-	pinctrl-names = "default";
-};
-
-i2c_internal: &i2c2 {
-    status = "okay";
-    pinctrl-0 = <&i2c2_scl_pb10 &i2c2_sda_pb11>;
-    pinctrl-names = "default";
-    label = "I2C_INTERNAL";
-
-    // TODO: FUSB302
+    arduino_nano_header: connector {
+        compatible = "arduino-nano-header-r3";
+        #gpio-cells = <2>;
+        gpio-map-mask = <0xffffffff 0xffffffc0>;
+        gpio-map-pass-thru = <0 0x3f>;
+        gpio-map =
+            <0 0 &gpioa 10 0>,  /* D0 / UART1-RX */
+            <1 0 &gpioa 9 0>,   /* D1 / UART1-TX */
+            <2 0 &gpioa 1 0>,   /* D2 */
+            <3 0 &gpioa 2 0>,   /* D3 */
+            <4 0 &gpioa 3  0>,  /* D4 */
+            <5 0 &gpioa 4 0>,   /* D5 */
+            <6 0 &gpioa 5 0>,   /* D6 */
+            <7 0 &gpioa 6 0>,   /* D7 */
+            <8 0 &gpioa 7 0>,   /* D8 */
+            <9 0 &gpiob 12 0>,  /* D9 */
+            <10 0 &gpiob 0 0>,  /* D10 */
+            <11 0 &gpiob 15 0>, /* D11 / SPI2-MOSI */
+            <12 0 &gpiob 14 0>, /* D12 / SPI2-MISO */
+            <13 0 &gpiob 13 0>, /* D13 / SPI2-SCK */
+            <14 0 &gpiob 1 0>,  /* D14 */
+            <15 0 &gpiob 8 0>,  /* D15 */
+            <16 0 &gpioa 15 0>, /* D16 */
+            <17 0 &gpiob 2 0>,  /* D17 */
+            <18 0 &gpiob 7 0>,  /* D18 / I2C1-SDA */
+            <19 0 &gpiob 6 0>,  /* D19 / I2C1-SCL */
+            <20 0 &gpiob 3 0>,  /* D20 */
+            <21 0 &gpiob 4 0>;  /* D21 */
+    };
 };
 
 &clk_hsi {
@@ -59,13 +84,34 @@ i2c_internal: &i2c2 {
 	apb1-prescaler = <1>;
 };
 
-&usart1 {
-	pinctrl-0 = <&usart1_tx_pa9 &usart1_rx_pa10>;
-	pinctrl-names = "default";
-	current-speed = <115200>;
-	status = "okay";
+&iwdg {
+    status = "okay";
 };
 
-&iwdg {
-	status = "okay";
+arduino_nano_i2c: &i2c1 {};
+arduino_nano_spi: &spi2 {};
+arduino_nano_serial: &usart1 {};
+
+zephyr_udc0: &usb {
+    pinctrl-0 = <&usb_dm_pa11 &usb_dp_pa12>;
+    pinctrl-names = "default";
+};
+
+&usart1 {
+    status = "okay";
+    pinctrl-0 = <&usart1_tx_pa9 &usart1_rx_pa10>;
+    pinctrl-names = "default";
+    current-speed = <115200>;
+};
+
+&i2c1 {
+    status = "okay";
+    pinctrl-0 = <&i2c1_scl_pb6 &i2c1_sda_pb7>;
+    pinctrl-names = "default";
+};
+
+&spi2 {
+    status = "okay";
+    pinctrl-0 = <&spi2_sck_pb13 &spi2_miso_pb14 &spi2_mosi_pb15>;
+    pinctrl-names = "default";
 };
