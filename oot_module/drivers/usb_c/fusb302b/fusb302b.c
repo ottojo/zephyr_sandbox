@@ -12,7 +12,7 @@
 #include <zephyr/drivers/usb_c/usbc_tcpc.h>
 #include <zephyr/logging/log.h>
 
-LOG_MODULE_REGISTER(fusb302b, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(fusb302b, LOG_LEVEL_WRN);
 
 static const uint8_t REG_DEVICE_ID = 0x01;
 static const uint8_t REG_SWITCHES0 = 0x02;
@@ -27,6 +27,13 @@ static const uint8_t REG_STATUS0 = 0x40;
 static const uint8_t REG_STATUS1 = 0x41;
 static const uint8_t REG_FIFO = 0x43;
 
+static const uint8_t TX_TOKEN_TXON = 0xA1;
+static const uint8_t TX_TOKEN_SOP1 = 0x12;
+static const uint8_t TX_TOKEN_SOP2 = 0x13;
+static const uint8_t TX_TOKEN_PACKSYM = 0x80;
+static const uint8_t TX_TOKEN_JAM_CRC = 0xFF;
+static const uint8_t TX_TOKEN_EOP = 0x14;
+static const uint8_t TX_TOKEN_TXOFF = 0xFE;
 
 bool fusb302b_verify(const struct device *dev) {
     const struct fusb302b_cfg *cfg = dev->config;
@@ -91,7 +98,7 @@ bool fusb302b_verify(const struct device *dev) {
             __ASSERT_NO_MSG(false);
             return -EIO;
     }
-    LOG_INF("%s %s_%s detected\n", product_str, version_str, revision_str);
+    LOG_INF("%s %s_%s detected", product_str, version_str, revision_str);
 
     return true;
 }
@@ -112,8 +119,26 @@ static bool vbus_above(const struct fusb302b_cfg *cfg, uint8_t level) {
     return above;
 }
 
+int fusb302_check_vbus_level(const struct device *dev, enum tc_vbus_level level) {
+    const struct fusb302b_cfg *cfg = dev->config;
+
+    switch (level) {
+        case TC_VBUS_SAFE0V:
+            return !vbus_above(cfg, 0 /* 420mv */);
+        case TC_VBUS_PRESENT:
+            return vbus_above(cfg, 10 /* 4620mV */);
+        case TC_VBUS_REMOVED:
+            return !vbus_above(cfg, 7 /* 3360mV */);
+        default:
+            LOG_ERR("Invalid value for tc_vbus_level: %d", level);
+            break;
+    }
+    return false;
+}
+
 int fusb302_measure_vbus(const struct device *dev, int *meas) {
     const struct fusb302b_cfg *cfg = dev->config;
+    LOG_WRN("Measuring VBUS exactly, this may be slow");
 
     // Set MEAS_CC bits to 0
     int res = i2c_reg_write_byte_dt(&cfg->i2c, REG_SWITCHES0, 0x00000011);
@@ -157,10 +182,25 @@ enum cc_res {
     CC_RES_NONE
 };
 
-static enum cc_res get_cc_line(const struct fusb302b_cfg *cfg) {
+static const char *cc_res_to_str(enum cc_res res) {
+    switch (res) {
+        case CC_RES_1:
+            return "CC_RES_1";
+        case CC_RES_2:
+            return "CC_RES_2";
+        case CC_RES_BOTH:
+            return "CC_RES_BOTH";
+        case CC_RES_NONE:
+            return "CC_RES_NONE";
+    }
+    return "<INVALID>";
+}
+
+static int get_cc_line(const struct fusb302b_cfg *cfg, enum cc_res *out) {
     // Connect ADC to CC1 (set MEAS_CC1)
     int res = i2c_reg_write_byte_dt(&cfg->i2c, REG_SWITCHES0, 0b00000111);
     if (res != 0) { return -EIO; }
+    k_usleep(250);
     // Read voltage level BC_LVL
     uint8_t status0;
     res = i2c_reg_read_byte_dt(&cfg->i2c, REG_STATUS0, &status0);
@@ -169,63 +209,46 @@ static enum cc_res get_cc_line(const struct fusb302b_cfg *cfg) {
     // Connect ADC to CC2
     res = i2c_reg_write_byte_dt(&cfg->i2c, REG_SWITCHES0, 0b00001011);
     if (res != 0) { return -EIO; }
+    k_usleep(250);
     // Read voltage level BC_LVL
     res = i2c_reg_read_byte_dt(&cfg->i2c, REG_STATUS0, &status0);
     if (res != 0) { return -EIO; }
     uint8_t voltage_level_2 = status0 & 0b11;
 
-    uint8_t used_cc_line;
     if (voltage_level_1 > voltage_level_2) {
         //LOG_INF("CC pin in use: %d", 1);
-        return CC_RES_1;
+        *out = CC_RES_1;
     } else if (voltage_level_2 > voltage_level_1) {
         //LOG_INF("CC pin in use: %d", 2);
-        return CC_RES_2;
+        *out = CC_RES_2;
     } else if (voltage_level_1 == 0 && voltage_level_2 == 0) {
         // No CC connected?
         //LOG_WRN("No CC pins connected!");
-        return CC_RES_NONE;
+        *out = CC_RES_NONE;
     } else {
-        //LOG_WRN("Invalid CC voltage levels: BC_LVL 1: %d, BC_LVL 2: %d", voltage_level_1, voltage_level_2);
-        return CC_RES_BOTH;
+        LOG_WRN("Invalid CC voltage levels: BC_LVL 1: %d, BC_LVL 2: %d", voltage_level_1, voltage_level_2);
+        *out = CC_RES_BOTH;
     }
+
+    // TODO: BC_LVL 0b11 special? 3A?
+    // 11: >1.23V why both tho?
+
+    return 0;
 }
 
 int fusb302_setup(const struct device *dev) {
     LOG_INF("Running setup");
     const struct fusb302b_cfg *cfg = dev->config;
-    // Detect which CC line is in use
 
-    enum cc_res cc = get_cc_line(cfg);
-    uint8_t used_cc_line = 0;
-    switch (cc) {
-        case CC_RES_1:
-            used_cc_line = 1;
-            break;
-        case CC_RES_2:
-            used_cc_line = 2;
-            break;
-        case CC_RES_BOTH:
-            return -EIO;
-        case CC_RES_NONE:
-            return -EIO;
-    }
-
-    // Enable transmit driver for proper CC line, enable AUTO_CRC
-    uint8_t cc_select = (used_cc_line == 1) ? 0b01 : 0b10;
-    int res = i2c_reg_write_byte_dt(&cfg->i2c, REG_SWITCHES1, 0b00100100 | cc_select);
-    if (res != 0) { return -EIO; }
-    // Connect measure block to proper CC line
-    res = i2c_reg_write_byte_dt(&cfg->i2c, REG_SWITCHES0, 0b00000011 | (cc_select << 2));
-    if (res != 0) { return -EIO; }
-
+    LOG_INF("Flushing TX and RX buffers");
     // Flush TX buffer (TX_FLUSH)
-    res = i2c_reg_write_byte_dt(&cfg->i2c, REG_CONTROL0, 0b01000000);
+    int res = i2c_reg_write_byte_dt(&cfg->i2c, REG_CONTROL0, 0b01000000);
     if (res != 0) { return -EIO; }
     // Flush RX buffer
     res = i2c_reg_write_byte_dt(&cfg->i2c, REG_CONTROL1, 0b00000100);
     if (res != 0) { return -EIO; }
     // Reset PD logic
+    LOG_INF("Resetting PD logic");
     res = i2c_reg_write_byte_dt(&cfg->i2c, REG_RESET, 0b00000010);
     if (res != 0) { return -EIO; }
 
@@ -233,8 +256,8 @@ int fusb302_setup(const struct device *dev) {
     return 0;
 }
 
-
 int fusb302b_init(const struct device *dev) {
+    LOG_INF("Init");
     const struct fusb302b_cfg *cfg = dev->config;
 
     if (!i2c_is_ready_dt(&cfg->i2c)) {
@@ -249,22 +272,34 @@ int fusb302b_init(const struct device *dev) {
         return -EIO;
     }
 
+    int res = 0;
+
+    // Disable Rd
+    //LOG_INF("Disabling Rd");
+    //res = i2c_reg_write_byte_dt(&cfg->i2c, REG_SWITCHES0, 0b00000000);
+    //if (res != 0) { return -EIO; }
+
     // Power up all parts of device
-    int res = i2c_reg_write_byte_dt(&cfg->i2c, REG_POWER, 0b00001111);
+    LOG_INF("Power up");
+    res = i2c_reg_write_byte_dt(&cfg->i2c, REG_POWER, 0b00001111);
     if (res != 0) {
         return -EIO;
     }
 
     // Unmask interrupts
+    LOG_INF("Enabling interrupts");
+    // TODO: This selects non-default HOST_CUR (Rp) (off instead of usb default power) (but Rp is not enabled anyways...)
     res = i2c_reg_write_byte_dt(&cfg->i2c, REG_CONTROL0, 0b00000000);
     if (res != 0) { return -EIO; }
 
     // Enable packet retries
+    LOG_INF("Enabling retries");
     res = i2c_reg_write_byte_dt(&cfg->i2c, REG_CONTROL3, 0b00000111);
     if (res != 0) {
         return -EIO;
     }
 
+    LOG_INF("Init done");
     return 0;
 }
 
@@ -285,34 +320,32 @@ static const char *cc_pull_to_str(enum tc_cc_pull cc_pull) {
 }
 
 static int fusb302b_set_cc(const struct device *dev, enum tc_cc_pull cc_pull) {
-    const struct fusb302b_cfg *cfg = dev->config;
+    LOG_INF("Setting both CC to %s", cc_pull_to_str(cc_pull));
 
-    LOG_INF("Setting CC to %s", cc_pull_to_str(cc_pull));
+    const struct fusb302b_cfg *cfg = dev->config;
 
     switch (cc_pull) {
         case TC_CC_RA:
+            LOG_ERR("Ra not supported.");
             return -ENOSYS;
         case TC_CC_RP: {
-            // Host pull up PU_EN
-            uint8_t switches0 = 0;
-            int res = i2c_reg_read_byte_dt(&cfg->i2c, REG_SWITCHES0, &switches0);
-            if (res != 0) { return -EIO; }
-            switches0 |= 0b11000000;
-            res = i2c_reg_write_byte_dt(&cfg->i2c, REG_SWITCHES0, switches0);
-            if (res != 0) { return -EIO; }
-            break;
+            LOG_ERR("Rp not supported.");
+            return -ENOSYS;
         }
         case TC_CC_RD: {
             // Device pull down PDWN
             uint8_t switches0 = 0;
             int res = i2c_reg_read_byte_dt(&cfg->i2c, REG_SWITCHES0, &switches0);
             if (res != 0) { return -EIO; }
-            switches0 |= 0b00000011;
+            switches0 |= 0b00000011; // set PDWN1,2
+            switches0 &= 0b00111111; // unset PU_EN1,2
             res = i2c_reg_write_byte_dt(&cfg->i2c, REG_SWITCHES0, switches0);
             if (res != 0) { return -EIO; }
             break;
         }
         case TC_CC_OPEN: {
+            LOG_WRN("IGNORING");
+            return 0;
             uint8_t switches0 = 0;
             int res = i2c_reg_read_byte_dt(&cfg->i2c, REG_SWITCHES0, &switches0);
             if (res != 0) { return -EIO; }
@@ -352,7 +385,7 @@ static void bc_lvl_to_cc_state(uint8_t bc_lvl, enum tc_cc_voltage_state *cc) {
     }
 }
 
-static const char *cc_state_to_str(enum tc_cc_voltage_state cc_state) {
+static const char *cc_voltage_state_to_str(enum tc_cc_voltage_state cc_state) {
     switch (cc_state) {
         case TC_CC_VOLT_OPEN:
             return "TC_CC_VOLT_OPEN";
@@ -374,7 +407,11 @@ static int fusb302b_get_cc(const struct device *dev, enum tc_cc_voltage_state *c
     const struct fusb302b_cfg *cfg = dev->config;
     //LOG_INF("Determining CC state");
     // TODO: Determine voltage (and therefore RP type), see https://hackaday.com/2023/01/04/all-about-usb-c-resistors-and-emarkers/
-    enum cc_res cc = get_cc_line(cfg);
+    enum cc_res cc;
+    int res = get_cc_line(cfg, &cc);
+    if (res != 0) { return -EIO; }
+
+    //LOG_INF("Determined CC state %s", cc_res_to_str(cc));
     switch (cc) {
         case CC_RES_1:
             *cc1 = TC_CC_VOLT_RP_DEF;
@@ -420,9 +457,8 @@ summarized in Table 5
  * @retval -ENOSYS if not implemented
  */
 static int fusb302b_receive_data(const struct device *dev, struct pd_msg *buf) {
-    LOG_INF("Receiving data");
-
     if (buf == NULL) {
+        LOG_ERR("Nullptr passed to fusb302b_receive_data");
         return -EFAULT;
     }
 
@@ -434,7 +470,6 @@ static int fusb302b_receive_data(const struct device *dev, struct pd_msg *buf) {
     uint8_t rx_empty = (status1 >> 5) & 0b1;
 
     if (rx_empty) {
-        LOG_INF("RX buffer empty\n");
         return -EIO;
     }
 
@@ -467,7 +502,6 @@ static int fusb302b_receive_data(const struct device *dev, struct pd_msg *buf) {
             return -EIO;
     }
 
-    // Length
     buf->header.raw_value = rx_buffer[1] | (rx_buffer[2] << 8);
     buf->len = PD_CONVERT_PD_HEADER_COUNT_TO_BYTES(buf->header.number_of_data_objects);
     LOG_INF("Received %d data objects", buf->header.number_of_data_objects);
@@ -483,7 +517,7 @@ static bool fusb302b_is_rx_pending_msg(const struct device *dev, enum pd_packet_
 }
 
 static int fusb302b_set_rx_enable(const struct device *dev, bool enable) {
-    LOG_WRN("Setting RX enabled");
+    LOG_WRN("TODO: Setting RX enabled");
     return -ENOSYS;
 }
 
@@ -491,7 +525,7 @@ int fusb302b_set_cc_polarity(const struct device *dev, enum tc_cc_polarity polar
     const struct fusb302b_cfg *cfg = dev->config;
     // Enable transmit driver for proper CC line
     uint8_t cc_select = (polarity == TC_POLARITY_CC1) ? 0b01 : 0b10;
-    LOG_INF("Enabling TX driver for CC %d", cc_select);
+    LOG_INF("Enabling TX driver for CC %d and AUTO_CRC", cc_select);
     int res = i2c_reg_write_byte_dt(&cfg->i2c, REG_SWITCHES1, 0b00100100 | cc_select);
     if (res != 0) { return -EIO; }
     return 0;
@@ -502,6 +536,61 @@ int fusb302b_set_alert_handler_cb(const struct device *dev, tcpc_alert_handler_c
     // TODO: Actually call that handler at some point
     data->alert_info.handler = handler;
     data->alert_info.data = alert_data;
+    return 0;
+}
+
+int fusb302b_transmit_data(const struct device *dev, struct pd_msg *msg) {
+    LOG_ERR("TRANSMITTING");
+    // TODO verify size < FIFO size?
+    // TODO: Flush TX buffer
+    const struct fusb302b_cfg *cfg = dev->config;
+    const struct fusb302b_data *data = dev->data;
+
+
+    //__ASSERT_NO_MSG(msg->type == PD_PACKET_SOP);
+    if (msg->type != PD_PACKET_SOP) {
+        LOG_ERR("Packet type not supported");
+        return -ENOSYS;
+    }
+
+    if (msg->len > (48 - 2 - 5 - 4)) {
+        LOG_ERR("Packet too long");
+        return -ENOSYS;
+    }
+
+    if(msg->len == 0){
+        LOG_ERR("Message length 0");
+        return -ENOSYS;
+    }
+
+    LOG_INF("Flushing TX buffer");
+    // Flush TX buffer (TX_FLUSH)
+    int res = i2c_reg_write_byte_dt(&cfg->i2c, REG_CONTROL0, 0b01000000);
+    if (res != 0) { return -EIO; }
+
+    uint8_t sop[5] = {TX_TOKEN_SOP1, TX_TOKEN_SOP1, TX_TOKEN_SOP1, TX_TOKEN_SOP2,
+                      TX_TOKEN_PACKSYM | ((msg->len + 2) & 0b00011111)};
+    //LOG_HEXDUMP_WRN(sop, 5, "SOP");
+    res = i2c_burst_write_dt(&cfg->i2c, REG_FIFO, sop, sizeof(sop));
+    if (res != 0) { return -EIO; }
+
+    uint8_t header[2] = {msg->header.raw_value & 0xFF, msg->header.raw_value >> 8};
+    //LOG_HEXDUMP_WRN(header, 2, "header");
+    res = i2c_burst_write_dt(&cfg->i2c, REG_FIFO, header, sizeof(header));
+    if (res != 0) { return -EIO; }
+
+    //LOG_HEXDUMP_WRN(msg->data, msg->len, "data");
+    res = i2c_burst_write_dt(&cfg->i2c, REG_FIFO, msg->data, msg->len);
+    if (res != 0) { return -EIO; }
+
+    uint8_t eop[4] = {TX_TOKEN_JAM_CRC, TX_TOKEN_EOP, TX_TOKEN_TXOFF, TX_TOKEN_TXON};
+    //LOG_HEXDUMP_WRN(eop, 4, "EOP");
+    res = i2c_burst_write_dt(&cfg->i2c, REG_FIFO, eop, sizeof(eop));
+    if (res != 0) { return -EIO; }
+
+    // TODO: Do this when goodcrc received data->alert_info.handler(dev, data->alert_info.data, TCPC_ALERT_TRANSMIT_MSG_SUCCESS);
+
+    LOG_ERR("TRANSMIT DONE");
     return 0;
 }
 
@@ -521,7 +610,7 @@ static const struct tcpc_driver_api fusb302b_tcpc_driver_api = {
         .is_rx_pending_msg = fusb302b_is_rx_pending_msg, // Optional
         .set_rx_enable = fusb302b_set_rx_enable, // Optional
         .set_cc_polarity = fusb302b_set_cc_polarity,
-        .transmit_data = NULL, // Optional
+        .transmit_data = fusb302b_transmit_data, // Optional
         .dump_std_reg = NULL, // Optional
         .alert_handler_cb=NULL, // Unused?
         .get_status_register=NULL, // Optional

@@ -20,4 +20,6 @@ int fusb302_setup(const struct device *dev);
 
 int fusb302_measure_vbus(const struct device *dev, int *meas);
 
+int fusb302_check_vbus_level(const struct device *dev, enum tc_vbus_level level);
+
 #endif //ZEPHYR_SANDBOX_2_FUSB302B_H

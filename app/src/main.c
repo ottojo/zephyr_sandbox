@@ -129,7 +129,7 @@ uint32_t policy_cb_get_rdo(const struct device *dev) {
 void handle_src_caps(const struct device *dev, const uint32_t *pdos,
                      const int num_pdos) {
     for (int i = 0; i < num_pdos; i++) {
-        display_pdo(i, pdos[i]);
+        //display_pdo(i, pdos[i]);
     }
 }
 
@@ -148,7 +148,7 @@ int main() {
 
     usbc_set_policy_cb_set_src_cap(port1, handle_src_caps);
 
-    //usbc_set_policy_cb_get_rdo(port1, policy_cb_get_rdo);
+    usbc_set_policy_cb_get_rdo(port1, policy_cb_get_rdo);
 
     LOG_INF("Starting USB-C");
     usbc_start(port1);

@@ -27,23 +27,9 @@ static int fusb_measure(const struct device *dev, int *vbus_meas) {
 }
 
 static bool fusb_check_level(const struct device *dev, enum tc_vbus_level level) {
-    int meas = 0;
-    // TODO: Set comparator directly at the 3 levels
-    int ret = fusb_measure(dev, &meas);
-    if (ret != 0) {
-        return false;
-    }
+    const struct fusb302_vbus_cfg *const cfg = dev->config;
+    return fusb302_check_vbus_level(cfg->fusb_dev, level);
 
-    switch (level) {
-        case TC_VBUS_SAFE0V:
-            return (meas < PD_V_SAFE_0V_MAX_MV);
-        case TC_VBUS_PRESENT:
-            return (meas >= PD_V_SAFE_5V_MIN_MV);
-        case TC_VBUS_REMOVED:
-            return (meas < TC_V_SINK_DISCONNECT_MAX_MV);
-    }
-
-    return false;
 }
 
 static int fusb_discharge(const struct device *dev, bool enable) {
