@@ -59,7 +59,7 @@ static struct usbc_vbus_driver_api fusb302b_vbus_api = {
         &fusb302b_vbus_data_##inst, \
         &fusb302b_vbus_config_##inst, \
         /* level = */ POST_KERNEL, \
-        CONFIG_USBC_INIT_PRIORITY, \
+        CONFIG_USBC_VBUS_INIT_PRIORITY, \
         &fusb302b_vbus_api \
     );
 

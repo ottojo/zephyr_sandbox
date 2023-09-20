@@ -642,7 +642,7 @@ static const struct tcpc_driver_api fusb302b_tcpc_driver_api = {
         &fusb302b_data_##inst, \
         &fusb302b_config_##inst, \
         /* level = */ POST_KERNEL, \
-        CONFIG_USBC_INIT_PRIORITY, \
+        CONFIG_USBC_TCPC_INIT_PRIORITY, \
         &fusb302b_tcpc_driver_api \
     );
 
