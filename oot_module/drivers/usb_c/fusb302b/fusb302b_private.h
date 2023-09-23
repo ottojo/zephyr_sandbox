@@ -10,22 +10,17 @@
 
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/drivers/usb_c/usbc_tcpc.h>
+#include <zephyr/drivers/gpio.h>
 
 #define FUSB302_RX_BUFFER_SIZE 80
 
 
 struct alert_info {
-    /* Application supplied data that's passed to the
-     * application's alert handler callback
-     **/
     void *data;
-    /* Application's alert handler callback */
     tcpc_alert_handler_cb_t handler;
 };
 
 struct fusb302b_data {
-    tcpc_vconn_discharge_cb_t vconn_discharge_cb;
-    tcpc_vconn_control_cb_t vconn_cb;
     struct alert_info alert_info;
 };
 

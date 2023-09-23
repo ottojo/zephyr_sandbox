@@ -10,7 +10,7 @@
 
 #include <stdbool.h>
 #include <zephyr/device.h>
-
+#include <zephyr/drivers/usb_c/usbc_tc.h>
 
 int fusb302_reset(const struct device *dev);
 

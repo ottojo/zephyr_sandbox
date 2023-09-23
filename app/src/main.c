@@ -23,6 +23,7 @@ const struct device *const vbus_dev = DEVICE_DT_GET(DT_NODELABEL(fvbus));
 
 const struct device *const port1 = DEVICE_DT_GET(DT_NODELABEL(port1));
 
+uint32_t pdo_pos = 1;
 
 static void display_pdo(const int idx,
                         const uint32_t pdo_value) {
@@ -35,12 +36,12 @@ static void display_pdo(const int idx,
     switch (pdo.type) {
         case PDO_FIXED: {
             LOG_INF("\tType:              FIXED");
-            LOG_INF("\tCurrent:           %d",
-                    PD_CONVERT_FIXED_PDO_CURRENT_TO_MA(pdo.max_current));
+            //LOG_INF("\tCurrent:           %d",
+            //        PD_CONVERT_FIXED_PDO_CURRENT_TO_MA(pdo.max_current));
             LOG_INF("\tVoltage:           %d",
                     PD_CONVERT_FIXED_PDO_VOLTAGE_TO_MV(pdo.voltage));
-            LOG_INF("\tPeak Current:      %d", pdo.peak_current);
-            LOG_INF("\tUchunked Support:  %d",
+            //LOG_INF("\tPeak Current:      %d", pdo.peak_current);
+            /*LOG_INF("\tUchunked Support:  %d",
                     pdo.unchunked_ext_msg_supported);
             LOG_INF("\tDual Role Data:    %d",
                     pdo.dual_role_data);
@@ -51,7 +52,7 @@ static void display_pdo(const int idx,
             LOG_INF("\tUSB Suspend:       %d",
                     pdo.usb_suspend_supported);
             LOG_INF("\tDual Role Power:   %d",
-                    pdo.dual_role_power);
+                    pdo.dual_role_power);*/
         }
             break;
         case PDO_BATTERY: {
@@ -120,7 +121,7 @@ uint32_t policy_cb_get_rdo(const struct device *dev) {
     rdo.fixed.giveback = 0;
     /* Object position 1 (5V PDO) */
     // TODO: Find out which source PDO lists the voltage we want. 1 is special for 5v or something
-    rdo.fixed.object_pos = 1;
+    rdo.fixed.object_pos = pdo_pos;
 
     return rdo.raw_value;
 
@@ -130,9 +131,28 @@ void handle_src_caps(const struct device *dev, const uint32_t *pdos,
                      const int num_pdos) {
     for (int i = 0; i < num_pdos; i++) {
         //display_pdo(i, pdos[i]);
+        union pd_fixed_supply_pdo_source pdo;
+        /* Default to fixed supply pdo source until type is detected */
+        pdo.raw_value = pdos[i];
+        if (pdo.voltage == PD_CONVERT_MV_TO_FIXED_PDO_VOLTAGE(9000)) {
+            LOG_WRN("Selecting PDO for use!");
+            pdo_pos = i + 1;
+        }
     }
 }
 
+void notify_cb(const struct device *dev, const enum usbc_policy_notify_t policy_notify) {
+    switch (policy_notify) {
+        case TRANSITION_PS:
+            LOG_INF("TRANSITION_PS");
+            break;
+        case PORT_PARTNER_NOT_RESPONSIVE:
+            LOG_ERR("Port partner unresponsive.");
+            break;
+        default:
+            LOG_WRN("Unhandled notification: %d", policy_notify);
+    }
+}
 
 int main() {
     int ret;
@@ -150,45 +170,13 @@ int main() {
 
     usbc_set_policy_cb_get_rdo(port1, policy_cb_get_rdo);
 
+    usbc_set_policy_cb_notify(port1, notify_cb);
+
     LOG_INF("Starting USB-C");
     usbc_start(port1);
 
     while (true) {
         gpio_pin_toggle_dt(&led);
         k_sleep(K_MSEC(1000));
-    }
-
-    int i = 0;
-    while (true) {
-        k_sleep(K_MSEC(5000));
-
-        ret = gpio_pin_toggle_dt(&led);
-        if (ret < 0) {
-            return 0;
-        }
-
-        if (device_is_ready(fusb_dev)) {
-            LOG_INF("FUSB device ready\n");
-            if (fusb302b_verify(fusb_dev)) {
-                LOG_INF("FUSB device verified\n");
-                if (fusb302_setup(fusb_dev) == 0) {
-                    LOG_INF("FUSB setup successful\n");
-                } else {
-                    LOG_ERR("FUSB setup unsuccessful\n");
-                }
-
-                int meas = 0;
-                if (usbc_vbus_measure(vbus_dev, &meas) == 0) {
-                    LOG_INF("VBUS Measurement successful: %d mV", meas);
-                } else {
-                    LOG_ERR("VBUS Measurement unsuccessful");
-                }
-            } else {
-                LOG_ERR("FUSB device not verified\n");
-            }
-        } else {
-            LOG_ERR("FUSB device not ready\n");
-        }
-        i++;
     }
 }
