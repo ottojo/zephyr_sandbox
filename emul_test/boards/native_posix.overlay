@@ -1,0 +1,14 @@
+&i2c0 {
+    status = "okay";
+    fusb: fusb302b@22 {
+        compatible = "fcs,fusb302b";
+        status = "okay";
+        reg = <0x22>;
+    };
+
+    fvbus: fusb302b-vbus@22 {
+        compatible = "fcs,fusb302b-vbus";
+        fusb302b = <&fusb>;
+        reg = <0x22>;
+    };
+};
