@@ -1,4 +1,5 @@
 #include <zephyr/dt-bindings/usb-c/pd.h>
+#include <zephyr/dt-bindings/comparator/stm32.h>
 
 /*
 &zephyr_udc0 {
@@ -12,6 +13,7 @@
 
 i2c_internal: &i2c2 {
     status = "okay";
+
     fusb: fusb302b@22 {
         compatible = "fcs,fusb302b";
         status = "okay";
@@ -19,11 +21,43 @@ i2c_internal: &i2c2 {
     };
 };
 
-&usart1{
+&usart1 {
     current-speed = <921600>;
 };
 
 / {
+    soc {
+        comp1: comp@4001001c {
+            compatible = "st,stm32-comparators";
+            status = "okay";
+            reg = <0x4001001C 1>;
+
+            #address-cells = <1>;
+            #size-cells = <0>;
+
+            pinctrl-0 = <&comp1_inp_pa1 &comp1_out_pa6 &comp2_inp_pa3 &comp2_out_pa2>;
+            pinctrl-names = "default";
+
+            channel@1 {
+                status = "okay";
+                reg = <1>;
+                zephyr,input-positive = <COMP_NONINVERTINGINPUT_IO1>;
+                zephyr,input-negative = <COMP_INVERTINGINPUT_1_2VREFINT>;
+                /delete-property/ zephyr,invert-output;
+                zephyr,output = <COMP_OUTPUT_NONE>;
+            };
+
+            channel@2 {
+                status = "okay";
+                reg = <2>;
+                zephyr,input-positive = <COMP_NONINVERTINGINPUT_IO1>;
+                zephyr,input-negative = <COMP_INVERTINGINPUT_1_2VREFINT>;
+                zephyr,invert-output;
+                zephyr,output = <COMP_OUTPUT_NONE>;
+            };
+        };
+    };
+
     chosen {
         zephyr,shell-uart = &usart1;
     };
@@ -40,7 +74,7 @@ i2c_internal: &i2c2 {
         port1: usbc-port@1 {
             compatible = "usb-c-connector";
             reg = <1>;
-            tcpc = <&fusb>; // Type C Port Controller
+            tcpc = <&fusb>;
             vbus = <&fvbus>;
             power-role = "sink";
             sink-pdos = <PDO_FIXED(9000, 100, 0)>;
