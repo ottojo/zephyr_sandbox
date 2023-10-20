@@ -8,9 +8,17 @@ manifest:
   projects:
     - name: zephyr
       remote: ottojo
-      revision: otterpill
+      revision: usbc-experiments
       import:
         name-allowlist:
-          - cmsis      # required by the ARM port
-          - hal_stm32  # required by the nucleo_f302r8 board (STM32 based)
+          - cmsis
 
+    - name: otterpill_zephyr
+      remote: ottojo
+      revision: main
+
+    - name: stm32_comp
+      repo-path: zephyr_stm32_comp
+      remote: ottojo
+      revision: main
+      import: true
