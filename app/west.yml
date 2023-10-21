@@ -7,8 +7,8 @@ manifest:
 
   projects:
     - name: zephyr
-      remote: ottojo
-      revision: usbc-experiments
+      remote: zephyrproject-rtos
+      revision: main
       import:
         name-allowlist:
           - cmsis
@@ -22,3 +22,7 @@ manifest:
       remote: ottojo
       revision: main
       import: true
+
+    - name: zephyr_fusb302b
+      remote: ottojo
+      revision: main
